@@ -1,2 +1,1 @@
-# Revocable-CPABE-KEK_Tree
-This code is algorithmic reproduction of "A Traceable and Revocable Ciphertext-Policy Attribute-based Encryption Scheme Based on Privacy Protection".
+This code is realization of "RBFAC: A Redactable Blockchain Framework with Fine-grained Access Control based on Flexible Policy Chameleon Hash".
