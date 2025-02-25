@@ -9,14 +9,14 @@ def main():
 
     Test_Setup = False
     Test_KeyGen = False
-    Test_Hash = False
+    Test_Hash = True
     Test_Verify = False
     Test_Decrypt = False
     Test_AdaptM = False
     Test_AdaptBM = False
     Test_AdaptP = False
     Test_AdaptCM = False
-    Test_Adapt2P = True
+    Test_Adapt2P = False
     Test_Trace = False
     Test_CTUpdate = False
     Test_TKGen = False
@@ -30,7 +30,7 @@ def main():
     #初始化双线性映射
     grp = PairingGroup("SS512")
 
-    TRH = TRH_CPabe(grp)
+    TRH = RBFAC(grp)
 
     # 初始化系统
     (mpk, msk, sk_tc, pk_tc) = TRH.Setup(tree)

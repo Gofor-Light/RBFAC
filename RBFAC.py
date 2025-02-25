@@ -1,22 +1,16 @@
-'''
-    paper: A traceble and Revocalble ciphertext-policy attribute-base encryption scheme based on privacy protection
-    author: Coco
-'''
-from charm.toolbox.pairinggroup import PairingGroup, ZR, G1, G2, GT, pair
+from charm.toolbox.pairinggroup import PairingGroup, ZR, G1, GT, pair
 from charm.toolbox.secretutil import SecretUtil
 from datetime import datetime
 from msp import MSP
 from Cover import *
 from AES import *
 
-debug = False
 
 
-class TRH_CPabe:
+class RBFAC:
     def __init__(self, groupObj, verbose=False):
         self.group = groupObj
         self.util = MSP(self.group, verbose)
-        self.deposit = 100
 
     # authority: input(lamda, A, T)
     def Setup(self, tree):
@@ -24,9 +18,6 @@ class TRH_CPabe:
         :param tree: 系统的用户树
         :return: 返回公钥(PP),私钥(MSK),TC秘钥(sk_tc),TC公钥(pk_tc)
         '''
-
-        if debug:
-            print('\nSetup algorithm:\n')
         
         # 随机生成必要的参数
         g = self.group.random(G1)
@@ -44,7 +35,7 @@ class TRH_CPabe:
         # 随机生成秘钥
         K_temp = self.group.random(ZR)
         K = self.group.serialize(K_temp).decode('UTF-8')
-        k = K[:32]  # 简化获取前32个字符的方式
+        k = K[:32]  
 
         # 计算公钥部分
         egg_alpha = pair(g, g) ** alpha
@@ -91,8 +82,6 @@ class TRH_CPabe:
         self.preOrderTraversal(Root.rchild, X, Y, g)
 
     def KeyGen(self, u_node, msk, pk, S):
-        if debug:
-            print('\n Key generation algorithm:\n')
 
         g = pk['g']
         a = msk['a']
@@ -150,8 +139,6 @@ class TRH_CPabe:
         :param R: 撤销列表
         :return: 返回加密后的密文，其中包括部分访问策略
         '''
-        if debug:
-            print("\nencryption algorithm:\n")
 
         policy = self.util.createPolicy(W['policy'])
         mono_span_prog = self.util.convert_policy_to_msp(policy)
@@ -197,17 +184,51 @@ class TRH_CPabe:
         }
         return CT
 
+    # # m不加密 自由修改编辑策略
+    # def Hash(self, mpk, m, W,mincover):
+        
+    #     # step 1 计算哈希值
+    #     g = mpk['g']
+    #     random_r = self.group.random(ZR)
+    #     R = self.group.random(GT)
+    #     e = self.group.hash(str(R), ZR)
+    #     p_prime = g**e
+    #     b = g**random_r * p_prime**self.group.hash(str(m), ZR)
+
+    #     # step 2 加密陷门
+    #     Ct = self.Encrypt(mpk, R, W,mincover)
+
+    #     # step 3 生成签名
+    #     keypair_sk = self.group.random(ZR)
+    #     keypair_pk = g**keypair_sk
+    #     esk = self.group.random(ZR)
+    #     epk = g**esk
+    #     c = g**(keypair_sk + e) 
+    #     sigma = esk + keypair_sk * self.group.hash((str(epk)+str(c)), ZR)
+
+    #     return {
+    #         'Cm':m,
+    #         'Ct':Ct,
+    #         'p_prime':p_prime,
+    #         'b':b,
+    #         'random_r':random_r,
+    #         'c':c,
+    #         'epk':epk,
+    #         'keypair_pk':keypair_pk,
+    #         'sigma': sigma
+    #     }
+
+    # m加密  提供高级策略 
+
     # 三次加密
-    def Encrypt3(self, PP, m,t,k, Wm,Wt,Wk,mincover):
+    def Encrypt3(self, PP, sk,t,k, Wm,Wt,Wk,mincover):
         '''
         :param PP: 系统公共参数
-        :param m: 需要加密的明文
+        :param sk t k: 需要加密的明文
         :param W: 访问控制方案，包括属性和属性值
         :param R: 撤销列表
         :return: 返回加密后的密文，其中包括部分访问策略
         '''
-        if debug:
-            print("\nencryption algorithm:\n")
 
         policy = self.util.createPolicy(Wm['policy'])
         mono_span_prog = self.util.convert_policy_to_msp(policy)
@@ -217,7 +238,7 @@ class TRH_CPabe:
         v = [self.group.random(ZR) for _ in range(num_cols)]
         sm = v[0]
 
-        C = m * PP['egg_alpha'] ** sm
+        C = sk * PP['egg_alpha'] ** sm
         C0 = PP['g'] ** sm
         C02 = PP['g_a'] ** sm
 
@@ -239,7 +260,7 @@ class TRH_CPabe:
 
         T = {node: PP['Y'][node] ** sm for node in mincover}
 
-        Cm = {
+        Cs = {
             'C': C,
             'C0': C0,
             'C02': C02,
@@ -331,50 +352,25 @@ class TRH_CPabe:
             'W_': Wk['policy'],
             'T': T
         }
-        return Cm,Ct,Ck
-
-    # # m不加密 自由修改编辑策略
-    # def Hash(self, mpk, m, W,mincover):
-        
-    #     # step 1 计算哈希值
-    #     g = mpk['g']
-    #     random_r = self.group.random(ZR)
-    #     R = self.group.random(GT)
-    #     e = self.group.hash(str(R), ZR)
-    #     p_prime = g**e
-    #     b = g**random_r * p_prime**self.group.hash(str(m), ZR)
-
-    #     # step 2 加密陷门
-    #     Ct = self.Encrypt(mpk, R, W,mincover)
-
-    #     # step 3 生成签名
-    #     keypair_sk = self.group.random(ZR)
-    #     keypair_pk = g**keypair_sk
-    #     esk = self.group.random(ZR)
-    #     epk = g**esk
-    #     c = g**(keypair_sk + e) 
-    #     sigma = esk + keypair_sk * self.group.hash((str(epk)+str(c)), ZR)
-
-    #     return {
-    #         'Cm':m,
-    #         'Ct':Ct,
-    #         'p_prime':p_prime,
-    #         'b':b,
-    #         'random_r':random_r,
-    #         'c':c,
-    #         'epk':epk,
-    #         'keypair_pk':keypair_pk,
-    #         'sigma': sigma
-    #     }
-
-    # m加密  双策略 
+        return Cs,Ct,Ck
     def Hash(self, mpk, m, W,mincover):
 
         # step 1 加密消息
+        # sk = self.group.random(GT)
+        # sk_temp = str(sk)[:32]
+        # Cm = encrypt_AES(str(m), sk_temp)
+
+        
+        # R = self.group.random(GT)
+        # k = self.group.random(GT)
+        # # Note that `sk`, `R`, and `k` are encrypted separately 
+        # # to simulate the encryption of `sk`, `sk||R`, and `sk||R||k`.
+        # Cs,Ct,Ck = self.Encrypt3(mpk,sk,R,k,W,W,W,mincover) 
+
         R = self.group.random(GT)
         k = self.group.random(GT)
         Cm,Ct,Ck = self.Encrypt3(mpk,m,R,k,W,W,W,mincover)
-        
+
         # step 2 计算哈希值
         g = mpk['g']
         random_r = self.group.random(ZR)
@@ -400,6 +396,7 @@ class TRH_CPabe:
 
         return {
             'Cm':Cm,
+            #'Cs':Cs,
             'Ct':Ct,
             'Ck':Ck,
             'K':K,
@@ -466,8 +463,6 @@ class TRH_CPabe:
         return is_valid
 
     def Decrypt(self, u_node, pk, CT, SK,mincover):
-        if debug:
-            print("\nDecrypt algorithm:\n")
 
         user_atts = list(SK['S'].keys())
         policy = self.util.createPolicy(CT['W_'])
@@ -508,8 +503,6 @@ class TRH_CPabe:
 
     # 三次解密
     def Decrypt3(self, u_node, pk, Cm,Ct,Ck,SK,mincover):
-        if debug:
-            print("\nDecrypt algorithm:\n")
 
         user_atts = list(SK['S'].keys())
         policy = self.util.createPolicy(Cm['W_'])
@@ -594,58 +587,6 @@ class TRH_CPabe:
 
         return m,t,k
 
-    # 交易级别编辑消息
-    def AdaptM(self, u_node,sk, mpk, m, p_prime, b, random_r, Ct,mincover):
-        
-        # step 1 解密陷门
-        R = self.Decrypt(u_node, mpk, Ct, sk,mincover)
-        e = self.group.hash(str(R), ZR)
-
-        # step 2 生成新消息
-        m_prime = self.group.random(GT)
-        
-        # step 3 计算random_r_prime
-        m_hash = self.group.hash(str(m), ZR)
-        m_prime_hash = self.group.hash(str(m_prime), ZR)
-        random_r_prime = random_r + (m_hash - m_prime_hash) * e
-
-        # step 4 生成新签名
-        keypair_sk_prime = self.group.random(ZR)
-        keypair_pk_prime = mpk['g'] ** keypair_sk_prime
-        esk_prime = self.group.random(ZR)
-        epk_prime = mpk['g'] ** esk_prime
-        c_prime = mpk['g'] ** (keypair_sk_prime + self.group.hash(str(R), ZR))
-        epk_prime_hash = self.group.hash((str(epk_prime) + str(c_prime)), ZR)
-        sigma_prime = esk_prime + keypair_sk_prime * epk_prime_hash
-        
-        return {
-            'm_prime': m_prime, 
-            'p_prime': p_prime, 
-            'b': b, 
-            'random_r_prime': random_r_prime, 
-            'c_prime': c_prime, 
-            'epk_prime': epk_prime, 
-            'sigma_prime': sigma_prime,
-            'keypair_pk_prime': keypair_pk_prime
-        }
-
-    # 区块级别编辑消息
-    def AdaptBM(self, mpk,p_prime):
-        
-        # step 2 生成新消息
-        m_prime = self.group.random(GT)
-        
-        # step 3 计算random_r_prime
-        g = mpk['g']
-        random_r_prime = self.group.random(ZR)
-        b = g**random_r_prime * p_prime**self.group.hash(str(m_prime), ZR)
-        
-        return {
-            'm_prime': m_prime, 
-            'p_prime': p_prime, 
-            'b': b, 
-            'random_r_prime': random_r_prime, 
-        }
 
     # 非加密场景 编辑消息及自由修改编辑策略
     def AdaptP(self, u_node, W, mpk,m,p_prime, b, random_r, sk,Ct,mincover):
@@ -828,3 +769,56 @@ class TRH_CPabe:
                 T_prime[v] = Yj
         # print("T_prime:", T_prime)
         return T_prime
+
+    # 交易级别编辑消息
+    def AdaptM(self, u_node,sk, mpk, m, p_prime, b, random_r, Ct,mincover):
+        
+        # step 1 解密陷门
+        R = self.Decrypt(u_node, mpk, Ct, sk,mincover)
+        e = self.group.hash(str(R), ZR)
+
+        # step 2 生成新消息
+        m_prime = self.group.random(GT)
+        
+        # step 3 计算random_r_prime
+        m_hash = self.group.hash(str(m), ZR)
+        m_prime_hash = self.group.hash(str(m_prime), ZR)
+        random_r_prime = random_r + (m_hash - m_prime_hash) * e
+
+        # step 4 生成新签名
+        keypair_sk_prime = self.group.random(ZR)
+        keypair_pk_prime = mpk['g'] ** keypair_sk_prime
+        esk_prime = self.group.random(ZR)
+        epk_prime = mpk['g'] ** esk_prime
+        c_prime = mpk['g'] ** (keypair_sk_prime + self.group.hash(str(R), ZR))
+        epk_prime_hash = self.group.hash((str(epk_prime) + str(c_prime)), ZR)
+        sigma_prime = esk_prime + keypair_sk_prime * epk_prime_hash
+        
+        return {
+            'm_prime': m_prime, 
+            'p_prime': p_prime, 
+            'b': b, 
+            'random_r_prime': random_r_prime, 
+            'c_prime': c_prime, 
+            'epk_prime': epk_prime, 
+            'sigma_prime': sigma_prime,
+            'keypair_pk_prime': keypair_pk_prime
+        }
+
+    # 区块级别编辑消息
+    def AdaptBM(self, mpk,p_prime):
+        
+        # step 2 生成新消息
+        m_prime = self.group.random(GT)
+        
+        # step 3 计算random_r_prime
+        g = mpk['g']
+        random_r_prime = self.group.random(ZR)
+        b = g**random_r_prime * p_prime**self.group.hash(str(m_prime), ZR)
+        
+        return {
+            'm_prime': m_prime, 
+            'p_prime': p_prime, 
+            'b': b, 
+            'random_r_prime': random_r_prime, 
+        }
