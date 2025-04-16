@@ -1,10 +1,11 @@
 from charm.toolbox.pairinggroup import PairingGroup, ZR, G1, GT, pair
 from charm.toolbox.secretutil import SecretUtil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from msp import MSP
 from Cover import *
 from AES import *
-
+from time import *
 
 
 class RBFAC:
@@ -218,13 +219,10 @@ class RBFAC:
     #         'sigma': sigma
     #     }
 
-    # m加密  提供高级策略 
-
-    # 三次加密
-    def Encrypt3(self, PP, sk,t,k, Wm,Wt,Wk,mincover):
+    def Encrypt3(self, PP, m,t,k, Wm,Wt,Wk,mincover):
         '''
         :param PP: 系统公共参数
-        :param sk t k: 需要加密的明文
+        :param m: 需要加密的明文
         :param W: 访问控制方案，包括属性和属性值
         :param R: 撤销列表
         :return: 返回加密后的密文，其中包括部分访问策略
@@ -238,7 +236,7 @@ class RBFAC:
         v = [self.group.random(ZR) for _ in range(num_cols)]
         sm = v[0]
 
-        C = sk * PP['egg_alpha'] ** sm
+        C = m * PP['egg_alpha'] ** sm
         C0 = PP['g'] ** sm
         C02 = PP['g_a'] ** sm
 
@@ -260,7 +258,7 @@ class RBFAC:
 
         T = {node: PP['Y'][node] ** sm for node in mincover}
 
-        Cs = {
+        Cm = {
             'C': C,
             'C0': C0,
             'C02': C02,
@@ -352,6 +350,73 @@ class RBFAC:
             'W_': Wk['policy'],
             'T': T
         }
+        return Cm,Ct,Ck
+
+    
+    # 并行加密
+    def MultiEncrypt(self, PP, sk,t,k, W,mincover):
+        '''
+        :param PP: 系统公共参数
+        :param sk t k: 需要加密的明文
+        :param W: 访问控制方案，包括属性和属性值
+        :param R: 撤销列表
+        :return: 返回加密后的密文，其中包括部分访问策略
+        '''
+
+        policy = self.util.createPolicy(W['policy'])
+        mono_span_prog = self.util.convert_policy_to_msp(policy)
+        num_cols = self.util.len_longest_row
+
+        def inner_function(sk):
+            # Generate random values for v in one step
+            v = [self.group.random(ZR) for _ in range(num_cols)]
+            sm = v[0]
+
+            C = sk * PP['egg_alpha'] ** sm
+            C0 = PP['g'] ** sm
+            C02 = PP['g_a'] ** sm
+
+            Ci1, Ci2, Ci3, lamda_i_list = {}, {}, {}, {}
+
+            for attr, row in mono_span_prog.items():
+                lamda_i = sum(row[i] * v[i] for i in range(len(row)))
+                lamda_i_list[attr] = lamda_i
+                t_i = self.group.random(ZR)
+                
+                # Compute C1, C2, C3 in one go
+                C1 = (PP['h'] ** lamda_i) * (PP['u'] ** t_i)
+                attr_stripped = self.util.strip_index(attr)
+                attr_value_ZR = self.group.hash(W['T'][attr_stripped], ZR)
+                C2 = PP['g'] ** (-t_i * attr_value_ZR + lamda_i)
+                C3 = PP['g'] ** t_i
+
+                Ci1[attr], Ci2[attr], Ci3[attr] = C1, C2, C3
+
+            T = {node: PP['Y'][node] ** sm for node in mincover}
+
+            Cs = {
+                'C': C,
+                'C0': C0,
+                'C02': C02,
+                'Ci1': Ci1,
+                'Ci2': Ci2,
+                'Ci3': Ci3,
+                'W_': W['policy'],
+                'T': T
+            }
+            return Cs
+        now = time()
+        with ThreadPoolExecutor(max_workers=3) as executor:
+                        # 提交任务
+            future1 = executor.submit(inner_function, sk)
+            future2 = executor.submit(inner_function, t)
+            future3 = executor.submit(inner_function, k)
+
+            # 获取结果
+            Cs = future1.result()
+            Ct = future2.result()
+            Ck = future3.result()
+        print("MultiEncrypt time:", time() - now)
         return Cs,Ct,Ck
     def Hash(self, mpk, m, W,mincover):
 
@@ -369,7 +434,55 @@ class RBFAC:
 
         R = self.group.random(GT)
         k = self.group.random(GT)
+        now = time()
         Cm,Ct,Ck = self.Encrypt3(mpk,m,R,k,W,W,W,mincover)
+        print("Encrypt3 time:", time() - now)
+        # step 2 计算哈希值
+        g = mpk['g']
+        random_r = self.group.random(ZR)
+        e = self.group.hash(str(R), ZR)
+        p_prime = g**e
+        b = g**random_r * p_prime**self.group.hash(str(Cm), ZR)
+
+        # step 3 生成证明信息
+        K = g**self.group.hash(str(k), ZR)
+        x = self.group.random(ZR)
+        X = mpk['g'] ** x
+        k_hash = self.group.hash(str(k), ZR)
+        K_hash = self.group.hash((str(X) + str(K)), ZR)
+        WW = x + k_hash * K_hash
+
+        # step 4 生成签名
+        keypair_sk = self.group.random(ZR)
+        keypair_pk = g**keypair_sk
+        esk = self.group.random(ZR)
+        epk = g**esk
+        c = g**(keypair_sk + e) 
+        sigma = esk + keypair_sk * self.group.hash((str(epk)+str(c)), ZR)
+
+        return {
+            'Cm':Cm,
+            #'Cs':Cs,
+            'Ct':Ct,
+            'Ck':Ck,
+            'K':K,
+            'WW':WW,
+            'X':X,
+            'p_prime':p_prime,
+            'b':b,
+            'random_r':random_r,
+            'c':c,
+            'epk':epk,
+            'keypair_pk':keypair_pk,
+            'sigma': sigma
+        }
+    #Multi threaded optimization
+    def MultiHash(self, mpk, m, W,mincover):
+
+        # step 1 加密消息
+        R = self.group.random(GT)
+        k = self.group.random(GT)
+        Cm,Ct,Ck = self.MultiEncrypt(mpk,m,R,k,W,mincover)
 
         # step 2 计算哈希值
         g = mpk['g']
